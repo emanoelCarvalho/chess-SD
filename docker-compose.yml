@@ -17,9 +17,9 @@ services:
     environment:
       - DATABASE_HOST=db
       - DATABASE_PORT=5432
-      - DATABASE_USER=postgres
-      - DATABASE_PASSWORD=postgres
-      - DATABASE_NAME=chess
+      - DATABASE_USER=root
+      - DATABASE_PASSWORD=faculdade
+      - DATABASE_NAME=chessGame
     depends_on:
       - db
     networks:
