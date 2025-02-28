@@ -8,11 +8,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { GameService } from './game.service';
 
-@WebSocketGateway(4000, {
-  cors: {
-    origin: '*',
-  },
-})
+@WebSocketGateway(4000, { cors: { origin: '*' } })
 export class GameGateway {
   @WebSocketServer()
   server: Server;
@@ -20,30 +16,24 @@ export class GameGateway {
   constructor(private readonly gameService: GameService) {}
 
   handleConnection(client: Socket) {
-    console.log(`Cliente conectado: ${client.id}`);
+    console.log(`✅ Cliente conectado: ${client.id}`);
   }
 
   handleDisconnect(client: Socket) {
-    console.log(`Cliente desconectado: ${client.id}`);
+    console.log(`⚠️ Cliente desconectado: ${client.id}`);
   }
 
   @SubscribeMessage('createGame')
   handleCreateGame(@ConnectedSocket() client: Socket) {
     const gameId = this.gameService.createGame();
-    
-    client.join(gameId);
-    client.emit('gameId', gameId);
-
-    console.log(`Novo jogo criado: ${gameId}`);
+    client.join(gameId); // Cliente entra na sala do jogo
+    client.emit('gameId', gameId); // Enviar ID do jogo ao cliente
+    console.log(`🎲 Novo jogo criado: ${gameId}`);
   }
 
   @SubscribeMessage('joinGame')
-  handleJoinGame(
-    @MessageBody() gameId: string,
-    @ConnectedSocket() client: Socket,
-  ) {
-    const game = this.gameService.joinGame(gameId);
-    
+  handleJoinGame(@MessageBody() gameId: string, @ConnectedSocket() client: Socket) {
+    const game = this.gameService.getGame(gameId);
     if (!game) {
       client.emit('error', 'Game not found');
       return;
@@ -53,35 +43,28 @@ export class GameGateway {
     client.emit('gameState', { fen: game.fen() });
     client.emit('playerColor', game.turn());
 
-    console.log(`Cliente ${client.id} entrou no jogo ${gameId}`);
+    console.log(`👤 Cliente ${client.id} entrou no jogo ${gameId}`);
   }
 
   @SubscribeMessage('move')
-  handleMove(
-    @MessageBody() data: { gameId: string; move: any },
-    @ConnectedSocket() client: Socket,
-  ) {
+  handleMove(@MessageBody() data: { gameId: string; move: any }, @ConnectedSocket() client: Socket) {
     const { gameId, move } = data;
-    const game = this.gameService.makeMove(gameId, move);
+    const result = this.gameService.makeMove(gameId, move);
 
-    if (!game) {
-      client.emit('error', 'Invalid move');
+    if (!result.success) {
+      client.emit('error', result.message);
       return;
     }
 
-    // Atualiza o estado do jogo para todos os jogadores da sala
-    this.server.to(gameId).emit('gameState', { fen: game.fen() });
+    // Atualiza estado do jogo para todos os jogadores da sala
+    this.server.to(gameId).emit('gameState', { fen: result.fen });
 
-    if (game.isGameOver()) {
-      let result = 'Game Over!';
-      if (game.isCheckmate()) {
-        result = `Checkmate! ${game.turn() === 'w' ? 'Black' : 'White'} wins!`;
-      } else if (game.isDraw()) {
-        result = 'Draw!';
-      }
-      this.server.to(gameId).emit('gameOver', result);
+    // Verifica se o jogo terminou
+    const gameOverMessage = this.gameService.checkGameOver(gameId);
+    if (gameOverMessage) {
+      this.server.to(gameId).emit('gameOver', gameOverMessage);
     }
 
-    console.log(`Movimento realizado no jogo ${gameId}:`, move);
+    console.log(`♟️ Movimento realizado no jogo ${gameId}:`, move);
   }
 }

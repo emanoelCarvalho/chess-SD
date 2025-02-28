@@ -4,7 +4,7 @@ services:
   frontend:
     build: ./frontend
     ports:
-      - "8080:80"
+      - "8080:3000"
     depends_on:
       - backend
     networks:
@@ -33,16 +33,6 @@ services:
       POSTGRES_DB: chess
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    networks:
-      - chess-network
-
-  nginx:
-    build: ./nginx
-    ports:
-      - "80:80"
-    depends_on:
-      - frontend
-      - backend
     networks:
       - chess-network
 

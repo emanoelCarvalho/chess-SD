@@ -5,6 +5,6 @@ import { GameModule } from './game/game.module';
 
 @Module({
   imports: [PlayersModule, GameModule],
-  providers: [ GameGateway],
+  providers: [GameGateway],
 })
 export class AppModule {}
