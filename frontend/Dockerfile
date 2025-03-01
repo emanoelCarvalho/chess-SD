@@ -1,14 +1,11 @@
-# Etapa de build
-FROM node:18-alpine AS build-stage
+FROM node:18-alpine AS production-stage
 WORKDIR /app
 COPY package*.json ./
 RUN npm install
 COPY . .
 RUN npm run build
 
-# Etapa de produção (sem NGINX, usando serve)
-FROM node:18-alpine AS production-stage
-WORKDIR /app
-COPY --from=build-stage /app/dist ./
-RUN npm install -g serve
-CMD ["serve", "-s", "."]
+# Servir os arquivos gerados na pasta dist
+FROM nginx:alpine
+COPY --from=production-stage /app/dist /usr/share/nginx/html
+COPY ../nginx/nginx.conf /etc/nginx/conf.d/default.conf

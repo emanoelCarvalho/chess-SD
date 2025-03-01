@@ -1,44 +1,39 @@
-version: '3.8'
-
 services:
   frontend:
-    build: ./frontend
-    ports:
-      - "8080:3000"
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile
     depends_on:
       - backend
-    networks:
-      - chess-network
+
+    expose:
+      - "80"
 
   backend:
-    build: ./backend
-    ports:
-      - "3000:3000"
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    expose:
+      - "3000"
     environment:
-      - DATABASE_HOST=db
-      - DATABASE_PORT=5432
-      - DATABASE_USER=root
-      - DATABASE_PASSWORD=faculdade
-      - DATABASE_NAME=chessGame
+      - DATABASE_URL=postgres://user:faculdade@db:5432/chess_db
     depends_on:
       - db
-    networks:
-      - chess-network
 
   db:
-    image: postgres:13
+    image: postgres:15
+    restart: always
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: chess
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - chess-network
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: chess_db
+    ports:
+      - "5432:5432"
 
-volumes:
-  postgres_data:
-
-networks:
-  chess-network:
-    driver: bridge
+  nginx:
+    build: ./nginx
+    ports:
+      - "8080:80"
+    depends_on:
+      - frontend
+      - backend

@@ -7,7 +7,7 @@ export class GameService {
 
   createGame(): string {
     const gameId = Math.random().toString(36).substring(2, 8);
-    this.games.set(gameId, new Chess()); // Criar novo jogo
+    this.games.set(gameId, new Chess());
     return gameId;
   }
 
@@ -18,14 +18,35 @@ export class GameService {
   makeMove(gameId: string, move: any): { success: boolean; fen?: string; message?: string } {
     const game = this.games.get(gameId);
     if (!game) return { success: false, message: 'Game not found' };
-    console.log(`🎲 ${gameId} - ${JSON.stringify(game)}`);
-
+  
+    // Verifica se o jogo já terminou
+    if (game.isGameOver()) {
+      return { success: false, message: 'Game is already over' };
+    }
+  
+    // Converte o movimento para string UCI
+    let moveString: string;
+    if (typeof move === 'object' && move.from && move.to) {
+      moveString = `${move.from}${move.to}`; // Converte para formato UCI (ex: "e2e4")
+    } else if (typeof move === 'string') {
+      moveString = move; // Assume que já está no formato UCI ou SAN
+    } else {
+      return { success: false, message: 'Invalid move format' };
+    }
+  
+    console.log(`🎲 ${gameId} - Tentando mover: ${moveString}`);
+  
     try {
-      const result = game.move(move);
-      if (!result) return { success: false, message: 'Invalid move' };
-
+      const result = game.move(moveString);
+      if (!result) {
+        console.log(`❌ Movimento inválido: ${moveString}`);
+        return { success: false, message: 'Invalid move' };
+      }
+  
+      console.log(`✅ Movimento realizado: ${JSON.stringify(result)}`);
       return { success: true, fen: game.fen() };
     } catch (error) {
+      console.error(`❌ Erro ao realizar movimento: ${error.message}`);
       return { success: false, message: 'Invalid move' };
     }
   }

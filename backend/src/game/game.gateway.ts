@@ -26,13 +26,16 @@ export class GameGateway {
   @SubscribeMessage('createGame')
   handleCreateGame(@ConnectedSocket() client: Socket) {
     const gameId = this.gameService.createGame();
-    client.join(gameId); // Cliente entra na sala do jogo
-    client.emit('gameId', gameId); // Enviar ID do jogo ao cliente
+    client.join(gameId);
+    client.emit('gameId', gameId);
     console.log(`🎲 Novo jogo criado: ${gameId}`);
   }
 
   @SubscribeMessage('joinGame')
-  handleJoinGame(@MessageBody() gameId: string, @ConnectedSocket() client: Socket) {
+  handleJoinGame(
+    @MessageBody() gameId: string,
+    @ConnectedSocket() client: Socket,
+  ) {
     const game = this.gameService.getGame(gameId);
     if (!game) {
       client.emit('error', 'Game not found');
@@ -47,7 +50,10 @@ export class GameGateway {
   }
 
   @SubscribeMessage('move')
-  handleMove(@MessageBody() data: { gameId: string; move: any }, @ConnectedSocket() client: Socket) {
+  handleMove(
+    @MessageBody() data: { gameId: string; move: any },
+    @ConnectedSocket() client: Socket,
+  ) {
     const { gameId, move } = data;
     const result = this.gameService.makeMove(gameId, move);
 
@@ -56,10 +62,8 @@ export class GameGateway {
       return;
     }
 
-    // Atualiza estado do jogo para todos os jogadores da sala
     this.server.to(gameId).emit('gameState', { fen: result.fen });
 
-    // Verifica se o jogo terminou
     const gameOverMessage = this.gameService.checkGameOver(gameId);
     if (gameOverMessage) {
       this.server.to(gameId).emit('gameOver', gameOverMessage);
