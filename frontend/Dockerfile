@@ -8,4 +8,4 @@ RUN npm run build
 # Servir os arquivos gerados na pasta dist
 FROM nginx:alpine
 COPY --from=production-stage /app/dist /usr/share/nginx/html
-COPY ../nginx/nginx.conf /etc/nginx/conf.d/default.conf
+COPY ./nginx.conf /etc/nginx/conf.d/default.conf

@@ -6,12 +6,12 @@ import { Game } from 'src/game/entities/game.entity';
   imports: [
     TypeOrmModule.forRoot({
       type: 'postgres',
-      host: 'localhost',
+      host: 'db',
       port: 5432,
-      username: 'seu_usuario', // Substitua pelo usuário do seu PostgreSQL
-      password: 'sua_senha', // Substitua pela senha do seu PostgreSQL
-      database: 'chess_db', // Substitua pelo nome do seu banco de dados
-      entities: [Game], // Registra a entidade Game
+      username: 'postgres', 
+      password: 'faculdade', 
+      database: 'chess_db', 
+      entities: [Game],
       synchronize: true,
     }),
   ],

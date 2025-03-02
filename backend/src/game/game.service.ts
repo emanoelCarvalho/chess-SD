@@ -1,66 +1,90 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Game } from './entities/game.entity';
 import { Chess } from 'chess.js';
 
 @Injectable()
 export class GameService {
   private games: Map<string, Chess> = new Map();
+  private readonly logger = new Logger(GameService.name);
 
-  createGame(): string {
-    const gameId = Math.random().toString(36).substring(2, 8);
-    this.games.set(gameId, new Chess());
-    return gameId;
-  }
+  constructor(
+    @InjectRepository(Game)
+    private readonly gameRepository: Repository<Game>,
+  ) {}
 
-  getGame(gameId: string): Chess | null {
-    return this.games.get(gameId) || null;
-  }
-
-  makeMove(gameId: string, move: any): { success: boolean; fen?: string; message?: string } {
-    const game = this.games.get(gameId);
-    if (!game) return { success: false, message: 'Game not found' };
-  
-    // Verifica se o jogo já terminou
-    if (game.isGameOver()) {
-      return { success: false, message: 'Game is already over' };
-    }
-  
-    // Converte o movimento para string UCI
-    let moveString: string;
-    if (typeof move === 'object' && move.from && move.to) {
-      moveString = `${move.from}${move.to}`; // Converte para formato UCI (ex: "e2e4")
-    } else if (typeof move === 'string') {
-      moveString = move; // Assume que já está no formato UCI ou SAN
-    } else {
-      return { success: false, message: 'Invalid move format' };
-    }
-  
-    console.log(`🎲 ${gameId} - Tentando mover: ${moveString}`);
-  
+  async createGame(): Promise<string> {
     try {
-      const result = game.move(moveString);
-      if (!result) {
-        console.log(`❌ Movimento inválido: ${moveString}`);
-        return { success: false, message: 'Invalid move' };
+      const game = new Chess();
+      const newGame = this.gameRepository.create({ fen: game.fen(), moves: [] });
+      await this.gameRepository.save(newGame);
+      this.games.set(newGame.id, game);
+      this.logger.log(`🎲 Novo jogo criado: ${newGame.id}`);
+      return newGame.id;
+    } catch (error) {
+      this.logger.error(`Erro ao criar jogo: ${error.message}`);
+      throw new Error('Erro ao criar jogo');
+    }
+  }
+
+  async makeMove(gameId: string, move: { from: string; to: string }) {
+    try {
+      const game = this.games.get(gameId);
+      if (!game) {
+        throw new Error('Jogo não encontrado');
       }
-  
-      console.log(`✅ Movimento realizado: ${JSON.stringify(result)}`);
+
+      const moveResult = game.move(move);
+      if (!moveResult) {
+        throw new Error('Movimento inválido');
+      }
+
+      await this.gameRepository.update(gameId, {
+        fen: game.fen(),
+        moves: () => `array_append(moves, '${JSON.stringify(move)}')`,
+      });
+
       return { success: true, fen: game.fen() };
     } catch (error) {
-      console.error(`❌ Erro ao realizar movimento: ${error.message}`);
-      return { success: false, message: 'Invalid move' };
+      this.logger.error(`Erro ao realizar movimento: ${error.message}`);
+      return { success: false, message: error.message };
     }
   }
 
-  checkGameOver(gameId: string): string | null {
-    const game = this.games.get(gameId);
-    if (!game) return null;
+  async checkGameOver(gameId: string) {
+    try {
+      const game = this.games.get(gameId);
+      if (!game) {
+        throw new Error('Jogo não encontrado');
+      }
 
-    if (game.isCheckmate()) {
-      return `Checkmate! ${game.turn() === 'w' ? 'Black' : 'White'} wins!`;
-    } else if (game.isDraw()) {
-      return 'Draw!';
+      if (game.isGameOver()) {
+        const gameEntity = await this.gameRepository.findOne({
+          where: { id: gameId },
+        });
+        const winner = game.isCheckmate() ? game.turn() : 'draw';
+        await this.gameRepository.update(gameId, { winner });
+        return { success: true, winner };
+      }
+
+      return { success: false, message: 'Jogo não terminou' };
+    } catch (error) {
+      this.logger.error(`Erro ao verificar fim do jogo: ${error.message}`);
+      return { success: false, message: error.message };
     }
+  }
 
-    return null;
+  async getGame(gameId: string): Promise<Chess | null> {
+    try {
+      const game = this.games.get(gameId);
+      if (!game) {
+        throw new Error('Jogo não encontrado');
+      }
+      return game;
+    } catch (error) {
+      this.logger.error(`Erro ao buscar jogo: ${error.message}`);
+      return null;
+    }
   }
 }
