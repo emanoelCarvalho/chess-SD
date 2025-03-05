@@ -1,19 +1,16 @@
-import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';
 
 @Entity()
 export class Game {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  @Column('text')
   fen: string;
 
-  @Column({ type: 'text', nullable: true }) 
-  moves: string;
+  @Column('text')
+  pgn: string;
 
-  @Column({ nullable: true })
-  winner: string;
-
-  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
-  createdAt: Date;
+  @Column('text', { nullable: true })
+  winner: string | null;
 }
