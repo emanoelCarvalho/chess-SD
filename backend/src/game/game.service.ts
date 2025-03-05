@@ -17,14 +17,14 @@ export class GameService {
 
   async createGame(): Promise<string> {
     const gameId = uuidv4();
-    const chess = new Chess(); // Inicializa um novo jogo de xadrez
+    const chess = new Chess();
     this.games.set(gameId, chess);
 
-    // Cria um novo registro no banco de dados com o estado inicial do jogo
     const newGame = this.gameRepository.create({
       id: gameId,
-      fen: chess.fen(), // Estado inicial do jogo
-      moves: chess.pgn(), // Inicializa a notação PGN vazia
+      fen: chess.fen(),
+      moves: chess.pgn(),
+      winner: null,
     });
 
     await this.gameRepository.save(newGame);
@@ -32,43 +32,30 @@ export class GameService {
   }
 
   async getGame(gameId: string): Promise<Game | null> {
-    const game = await this.gameRepository.findOne({ where: { id: gameId } });
-    return game || null;
+    let game = this.games.get(gameId);
+    if (!game) {
+      const storedGame = await this.gameRepository.findOne({ where: { id: gameId } });
+      if (!storedGame) return null;
+      game = new Chess(storedGame.fen);
+      this.games.set(gameId, game);
+    }
+    return this.gameRepository.findOne({ where: { id: gameId } });
   }
 
   async makeMove(gameId: string, move: string) {
-    if (!this.games.has(gameId)) {
-      const storedGame = await this.getGame(gameId);
-      if (!storedGame) {
-        return { success: false, message: 'Jogo não encontrado' };
-      }
-      const chess = new Chess(storedGame.fen);
-      this.games.set(gameId, chess);
-    }
-
     const game = this.games.get(gameId);
-    if (!game) {
-      return { success: false, message: 'Jogo não encontrado' };
-    }
+    if (!game) return { success: false, message: 'Jogo não encontrado' };
+    
+    console.log("Movimentos permitidos:", game.moves()); 
+    const moveResult = game.move({from: move.slice(0, 2), to: move.slice(2)});
+    if (!moveResult) return { success: false, message: 'Movimento inválido' };
 
-    // Verifica se o movimento é válido
-    try {
-      const result = game.move(move); // Tenta aplicar o movimento
-      if (!result) {
-        return { success: false, message: 'Movimento inválido' };
-      }
-
-      // Atualiza o estado do jogo no banco de dados
-      await this.gameRepository.update(gameId, {
-        fen: game.fen(),
-        moves: game.pgn(), // Atualiza a notação PGN dos movimentos
-      });
-
-      return { success: true, fen: game.fen() };
-    } catch (error) {
-      this.logger.error(`Erro ao realizar movimento: ${error.message}`);
-      return { success: false, message: 'Movimento inválido' };
-    }
+    await this.gameRepository.update(gameId, {
+      fen: game.fen(),
+      moves: game.pgn(),
+    });
+    
+    return { success: true, fen: game.fen() };
   }
 
   async checkGameOver(gameId: string) {
@@ -80,13 +67,9 @@ export class GameService {
       if (game.isCheckmate()) {
         winner = game.turn() === 'w' ? 'black' : 'white';
       }
-      await this.saveWinner(gameId, winner);
+      await this.gameRepository.update(gameId, { winner });
       return { success: true, winner, message: game.isCheckmate() ? 'Xeque-mate!' : 'Empate' };
     }
     return { success: false, message: 'Jogo ainda em andamento' };
-  }
-
-  private async saveWinner(gameId: string, winner: string) {
-    await this.gameRepository.update(gameId, { winner });
   }
 }

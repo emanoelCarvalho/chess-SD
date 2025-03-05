@@ -8,7 +8,7 @@ export class Game {
   @Column()
   fen: string;
 
-  @Column({ type: 'text', nullable: true }) // Armazena a notação PGN como string
+  @Column({ type: 'text', nullable: true }) 
   moves: string;
 
   @Column({ nullable: true })
