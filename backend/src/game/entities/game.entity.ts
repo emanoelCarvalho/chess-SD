@@ -1,24 +1,19 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  CreateDateColumn,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
 @Entity()
 export class Game {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ type: 'text' })
+  @Column()
   fen: string;
 
-  @Column({ type: 'jsonb', nullable: true })
-  moves: string
+  @Column({ type: 'text', nullable: true }) // Armazena a notação PGN como string
+  moves: string;
 
-  @Column({ type: 'varchar', nullable: true })
+  @Column({ nullable: true })
   winner: string;
 
-  @CreateDateColumn()
+  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 }

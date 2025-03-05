@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Chess } from 'chess.js';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -8,6 +8,7 @@ import { v4 as uuidv4 } from 'uuid';
 @Injectable()
 export class GameService {
   private games: Map<string, Chess> = new Map();
+  private readonly logger = new Logger(GameService.name);
 
   constructor(
     @InjectRepository(Game)
@@ -23,7 +24,7 @@ export class GameService {
     const newGame = this.gameRepository.create({
       id: gameId,
       fen: chess.fen(), // Estado inicial do jogo
-      moves: '', // Inicializa a lista de movimentos vazia
+      moves: chess.pgn(), // Inicializa a notação PGN vazia
     });
 
     await this.gameRepository.save(newGame);
@@ -44,34 +45,32 @@ export class GameService {
       const chess = new Chess(storedGame.fen);
       this.games.set(gameId, chess);
     }
-  
+
     const game = this.games.get(gameId);
     if (!game) {
       return { success: false, message: 'Jogo não encontrado' };
     }
-  
+
     // Verifica se o movimento é válido
-    const validMoves = game.moves();
-    const isValidMove = validMoves.some((m) => m === move);
-  
-    if (!isValidMove) {
-      return { success: false, message: 'Movimento inválido' };
-    }
-  
-    // Aplica o movimento
-    const result = game.move(move);
-    if (result) {
+    try {
+      const result = game.move(move); // Tenta aplicar o movimento
+      if (!result) {
+        return { success: false, message: 'Movimento inválido' };
+      }
+
       // Atualiza o estado do jogo no banco de dados
       await this.gameRepository.update(gameId, {
         fen: game.fen(),
-        moves: game.pgn(), // Salva a notação PGN dos movimentos como uma string
+        moves: game.pgn(), // Atualiza a notação PGN dos movimentos
       });
-  
+
       return { success: true, fen: game.fen() };
+    } catch (error) {
+      this.logger.error(`Erro ao realizar movimento: ${error.message}`);
+      return { success: false, message: 'Movimento inválido' };
     }
-  
-    return { success: false, message: 'Movimento inválido' };
   }
+
   async checkGameOver(gameId: string) {
     const game = this.games.get(gameId);
     if (!game) return { success: false, message: 'Jogo não encontrado' };
