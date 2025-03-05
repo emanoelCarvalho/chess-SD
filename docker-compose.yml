@@ -4,26 +4,26 @@ services:
   frontend:
     build: 
       context: ./frontend  # Diretório onde está o Dockerfile do frontend
-      dockerfile: Dockerfile  # O Dockerfile específico para o frontend
-    expose:
-      - "80"  # Expõe a porta 80 dentro da rede Docker (não precisa mapear para o host diretamente)
+      dockerfile: Dockerfile
+    ports:
+      - "3001:80"  # Mapeia a porta 80 do contêiner para a 3001 do host
     depends_on:
       - backend
     networks:
-      - app-network  # Adiciona a rede personalizada
+      - app-network
 
   backend:
     build: 
-      context: ./backend  # Diretório onde está o Dockerfile do backend
-      dockerfile: Dockerfile  # O Dockerfile específico para o backend
-    expose:
-      - "3000"  # Expõe a porta 3000 dentro da rede Docker
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"  # Corrigido erro de sintaxe
     environment:
-      - DATABASE_URL=postgres://postgres:faculdade@db:5432/chess_db  # URL de conexão com o banco de dados
+      - DATABASE_URL=postgres://postgres:faculdade@db:5432/chess_db
     depends_on:
       - db
     networks:
-      - app-network  # Adiciona a rede personalizada
+      - app-network
 
   db:
     image: postgres:13
@@ -33,27 +33,25 @@ services:
       POSTGRES_PASSWORD: faculdade
       POSTGRES_DB: chess_db
     volumes:
-      - postgres_data:/var/lib/postgresql/data  # Persistência de dados
+      - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"  # Mapeia a porta 5432 para o host
+      - "5432:5432"
     networks:
-      - app-network  # Adiciona a rede personalizada
+      - app-network
 
   nginx:
-    build: ./nginx  # Diretório onde está o Dockerfile do Nginx
+    build: ./nginx
     ports:
-      - "8080:80"  # Mapeia a porta 8080 do host para a porta 80 do contêiner
+      - "8080:80"
     depends_on:
       - frontend
       - backend
     networks:
-      - app-network  # Adiciona a rede personalizada
+      - app-network
 
-# Rede personalizada para os serviços se comunicarem
 networks:
   app-network:
-    driver: bridge  # Usando a rede bridge para comunicação entre os contêineres
+    driver: bridge
 
-# Volume para persistir dados do banco de dados
 volumes:
   postgres_data:

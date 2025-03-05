@@ -6,7 +6,7 @@ import { Game } from 'src/game/entities/game.entity';
   imports: [
     TypeOrmModule.forRoot({
       type: 'postgres',
-      host: 'db',
+      host:  'db',
       port: 5432,
       username: 'postgres', 
       password: 'faculdade', 

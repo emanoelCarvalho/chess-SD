@@ -14,7 +14,7 @@ export class Game {
   fen: string;
 
   @Column({ type: 'jsonb', nullable: true })
-  moves: { from: string; to: string }[];
+  moves: string
 
   @Column({ type: 'varchar', nullable: true })
   winner: string;

@@ -1,13 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { Chess } from 'chess.js';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Game } from './entities/game.entity';
-import { Chess } from 'chess.js';
+import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class GameService {
   private games: Map<string, Chess> = new Map();
-  private readonly logger = new Logger(GameService.name);
 
   constructor(
     @InjectRepository(Game)
@@ -15,76 +15,79 @@ export class GameService {
   ) {}
 
   async createGame(): Promise<string> {
-    try {
-      const game = new Chess();
-      const newGame = this.gameRepository.create({ fen: game.fen(), moves: [] });
-      await this.gameRepository.save(newGame);
-      this.games.set(newGame.id, game);
-      this.logger.log(`🎲 Novo jogo criado: ${newGame.id}`);
-      return newGame.id;
-    } catch (error) {
-      this.logger.error(`Erro ao criar jogo: ${error.message}`);
-      throw new Error('Erro ao criar jogo');
-    }
+    const gameId = uuidv4();
+    const chess = new Chess(); // Inicializa um novo jogo de xadrez
+    this.games.set(gameId, chess);
+
+    // Cria um novo registro no banco de dados com o estado inicial do jogo
+    const newGame = this.gameRepository.create({
+      id: gameId,
+      fen: chess.fen(), // Estado inicial do jogo
+      moves: '', // Inicializa a lista de movimentos vazia
+    });
+
+    await this.gameRepository.save(newGame);
+    return gameId;
   }
 
-  async makeMove(gameId: string, move: { from: string; to: string }) {
-    try {
-      const game = this.games.get(gameId);
-      if (!game) {
-        throw new Error('Jogo não encontrado');
-      }
+  async getGame(gameId: string): Promise<Game | null> {
+    const game = await this.gameRepository.findOne({ where: { id: gameId } });
+    return game || null;
+  }
 
-      const moveResult = game.move(move);
-      if (!moveResult) {
-        throw new Error('Movimento inválido');
+  async makeMove(gameId: string, move: string) {
+    if (!this.games.has(gameId)) {
+      const storedGame = await this.getGame(gameId);
+      if (!storedGame) {
+        return { success: false, message: 'Jogo não encontrado' };
       }
-
+      const chess = new Chess(storedGame.fen);
+      this.games.set(gameId, chess);
+    }
+  
+    const game = this.games.get(gameId);
+    if (!game) {
+      return { success: false, message: 'Jogo não encontrado' };
+    }
+  
+    // Verifica se o movimento é válido
+    const validMoves = game.moves();
+    const isValidMove = validMoves.some((m) => m === move);
+  
+    if (!isValidMove) {
+      return { success: false, message: 'Movimento inválido' };
+    }
+  
+    // Aplica o movimento
+    const result = game.move(move);
+    if (result) {
+      // Atualiza o estado do jogo no banco de dados
       await this.gameRepository.update(gameId, {
         fen: game.fen(),
-        moves: () => `array_append(moves, '${JSON.stringify(move)}')`,
+        moves: game.pgn(), // Salva a notação PGN dos movimentos como uma string
       });
-
+  
       return { success: true, fen: game.fen() };
-    } catch (error) {
-      this.logger.error(`Erro ao realizar movimento: ${error.message}`);
-      return { success: false, message: error.message };
     }
+  
+    return { success: false, message: 'Movimento inválido' };
   }
-
   async checkGameOver(gameId: string) {
-    try {
-      const game = this.games.get(gameId);
-      if (!game) {
-        throw new Error('Jogo não encontrado');
-      }
+    const game = this.games.get(gameId);
+    if (!game) return { success: false, message: 'Jogo não encontrado' };
 
-      if (game.isGameOver()) {
-        const gameEntity = await this.gameRepository.findOne({
-          where: { id: gameId },
-        });
-        const winner = game.isCheckmate() ? game.turn() : 'draw';
-        await this.gameRepository.update(gameId, { winner });
-        return { success: true, winner };
+    if (game.isGameOver()) {
+      let winner = 'draw';
+      if (game.isCheckmate()) {
+        winner = game.turn() === 'w' ? 'black' : 'white';
       }
-
-      return { success: false, message: 'Jogo não terminou' };
-    } catch (error) {
-      this.logger.error(`Erro ao verificar fim do jogo: ${error.message}`);
-      return { success: false, message: error.message };
+      await this.saveWinner(gameId, winner);
+      return { success: true, winner, message: game.isCheckmate() ? 'Xeque-mate!' : 'Empate' };
     }
+    return { success: false, message: 'Jogo ainda em andamento' };
   }
 
-  async getGame(gameId: string): Promise<Chess | null> {
-    try {
-      const game = this.games.get(gameId);
-      if (!game) {
-        throw new Error('Jogo não encontrado');
-      }
-      return game;
-    } catch (error) {
-      this.logger.error(`Erro ao buscar jogo: ${error.message}`);
-      return null;
-    }
+  private async saveWinner(gameId: string, winner: string) {
+    await this.gameRepository.update(gameId, { winner });
   }
 }
