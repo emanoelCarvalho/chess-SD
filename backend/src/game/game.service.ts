@@ -4,13 +4,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Game } from './entities/game.entity';
 import { v4 as uuidv4 } from 'uuid';
+import { Mutex } from 'async-mutex';
 
 @Injectable()
 export class GameService {
   private games: Map<string, Chess> = new Map();
+  private mutexes: Map<string, Mutex> = new Map();
   private readonly logger = new Logger(GameService.name);
-  private moveLocks: Map<string, boolean> = new Map();
-
 
   constructor(
     @InjectRepository(Game)
@@ -18,7 +18,7 @@ export class GameService {
   ) {}
 
   async createGame(): Promise<string> {
-    const gameId = uuidv4();
+    const gameId = uuidv4(); // ID único
     const chess = new Chess();
     this.games.set(gameId, chess);
 
@@ -28,74 +28,47 @@ export class GameService {
       pgn: chess.pgn(),
       winner: null,
     });
-
     await this.gameRepository.save(newGame);
     return gameId;
   }
 
   async getGame(gameId: string): Promise<Game | null> {
-    // Busca do banco de dados apenas se não estiver em memória
     if (!this.games.has(gameId)) {
       const storedGame = await this.gameRepository.findOne({ where: { id: gameId } });
       if (!storedGame) return null;
       this.games.set(gameId, new Chess(storedGame.fen));
+      return storedGame;
     }
     return this.gameRepository.findOne({ where: { id: gameId } });
   }
 
   async makeMove(gameId: string, move: string) {
-    // Verifica se já há um movimento em andamento para este jogo
-    if (this.moveLocks.get(gameId)) {
-      this.logger.warn(`Movimento já em progresso para o jogo: ${gameId}`);
-      return { success: false, message: 'Aguarde o movimento anterior' };
-    }
-  
+    const mutex = this.mutexes.get(gameId) || new Mutex();
+    this.mutexes.set(gameId, mutex);
+    const release = await mutex.acquire();
     try {
-      this.moveLocks.set(gameId, true);
-      
-      const game = this.games.get(gameId);
-      if (!game) return { success: false, message: 'Jogo não encontrado' };
-  
-      // Valida formato do movimento
-      if (!/^[a-h][1-8][a-h][1-8]$/.test(move)) {
-        return { success: false, message: 'Formato de movimento inválido' };
+      let game = this.games.get(gameId);
+      if (!game) {
+        const storedGame = await this.gameRepository.findOne({ where: { id: gameId } });
+        if (!storedGame) return { success: false, message: 'Jogo não encontrado' };
+        game = new Chess(storedGame.fen);
+        this.games.set(gameId, game);
       }
-  
-      // Executa movimento
-      const moveResult = game.move({
-        from: move.substring(0, 2),
-        to: move.substring(2, 4),
-        promotion: 'q' // Promoção padrão para dama
-      }, { strict: false });
-  
+      const moveResult = game.move(move);
       if (!moveResult) return { success: false, message: 'Movimento inválido' };
-  
-      // Atualiza banco de dados
-      await this.gameRepository.update(gameId, {
+      
+      const updateData: Partial<Game> = {
         fen: game.fen(),
-        pgn: game.pgn()
-      });
-  
-      return { success: true, fen: game.fen() };
-    } catch (error) {
-      this.logger.error(`Erro no movimento: ${error.message}`);
-      return { success: false, message: 'Erro interno' };
-    } finally {
-      this.moveLocks.set(gameId, false);
-    }
-  }
-  async checkGameOver(gameId: string) {
-    const game = this.games.get(gameId);
-    if (!game) return { success: false, message: 'Jogo não encontrado' };
-
-    if (game.isGameOver()) {
-      let winner = 'draw';
-      if (game.isCheckmate()) {
-        winner = game.turn() === 'w' ? 'black' : 'white';
+        pgn: game.pgn(),
+      };
+      if (game.isGameOver()) {
+        updateData.winner = game.turn() === 'w' ? 'black' : 'white';
       }
-      await this.gameRepository.update(gameId, { winner });
-      return { success: true, winner };
+      
+      await this.gameRepository.update(gameId, updateData);
+      return { success: true, fen: game.fen() };
+    } finally {
+      release();
     }
-    return { success: false };
   }
 }
