@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { GameGateway } from './game/game.gateway';
-import { PlayersModule } from './players/players.module';
 import { GameModule } from './game/game.module';
 import { DatabaseModule } from './database/database.module';
 import { ConfigModule } from '@nestjs/config';
@@ -10,7 +9,6 @@ import { ConfigModule } from '@nestjs/config';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
-    PlayersModule,
     GameModule,
     DatabaseModule,
   ],
