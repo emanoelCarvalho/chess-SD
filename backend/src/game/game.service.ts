@@ -1,3 +1,4 @@
+
 import { Injectable, Logger } from '@nestjs/common';
 import { Chess } from 'chess.js';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -18,7 +19,7 @@ export class GameService {
   ) {}
 
   async createGame(): Promise<string> {
-    const gameId = uuidv4(); // ID único
+    const gameId = uuidv4();
     const chess = new Chess();
     this.games.set(gameId, chess);
 
@@ -42,7 +43,7 @@ export class GameService {
     return this.gameRepository.findOne({ where: { id: gameId } });
   }
 
-  async makeMove(gameId: string, move: string) {
+  async makeMove(gameId: string, move: string): Promise<{ success: boolean; message?: string; fen?: string }> {
     const mutex = this.mutexes.get(gameId) || new Mutex();
     this.mutexes.set(gameId, mutex);
     const release = await mutex.acquire();
@@ -50,13 +51,13 @@ export class GameService {
       let game = this.games.get(gameId);
       if (!game) {
         const storedGame = await this.gameRepository.findOne({ where: { id: gameId } });
-        if (!storedGame) return { success: false, message: 'Jogo não encontrado' };
+        if (!storedGame) return { success: false, message: 'Game not found' };
         game = new Chess(storedGame.fen);
         this.games.set(gameId, game);
       }
       const moveResult = game.move(move);
-      if (!moveResult) return { success: false, message: 'Movimento inválido' };
-      
+      if (!moveResult) return { success: false, message: 'Invalid move' };
+
       const updateData: Partial<Game> = {
         fen: game.fen(),
         pgn: game.pgn(),
@@ -64,7 +65,7 @@ export class GameService {
       if (game.isGameOver()) {
         updateData.winner = game.turn() === 'w' ? 'black' : 'white';
       }
-      
+
       await this.gameRepository.update(gameId, updateData);
       return { success: true, fen: game.fen() };
     } finally {

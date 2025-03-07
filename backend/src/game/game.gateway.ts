@@ -16,22 +16,25 @@ export class GameGateway {
   server: Server;
 
   private readonly logger = new Logger(GameGateway.name);
-  private playerRoles: Map<string, { gameId: string; color: 'white' | 'black' }> = new Map();
+  private playerRoles: Map<
+    string,
+    { gameId: string; color: 'white' | 'black' }
+  > = new Map();
 
   constructor(private readonly gameService: GameService) {}
 
-  handleConnection(client: Socket) {
+  handleConnection(client: Socket): void {
     this.logger.log(`✅ Cliente conectado: ${client.id}`);
   }
 
-  handleDisconnect(client: Socket) {
+  handleDisconnect(client: Socket): void {
     this.logger.log(`⚠️ Cliente desconectado: ${client.id}`);
     this.playerRoles.delete(client.id);
-    client.rooms.forEach((room) => client.leave(room));
+    client.rooms.forEach((room: string) => client.leave(room));
   }
 
   @SubscribeMessage('createGame')
-  async handleCreateGame(@ConnectedSocket() client: Socket) {
+  async handleCreateGame(@ConnectedSocket() client: Socket): Promise<void> {
     try {
       const gameId = await this.gameService.createGame();
       client.join(gameId);
@@ -48,7 +51,7 @@ export class GameGateway {
   async handleJoinGame(
     @MessageBody() gameId: string,
     @ConnectedSocket() client: Socket,
-  ) {
+  ): Promise<void> {
     try {
       // Validação básica
       if (!gameId || typeof gameId !== 'string') {
@@ -67,14 +70,14 @@ export class GameGateway {
 
       // Entrar na sala e atribuir cor
       client.join(gameId);
-      const color = room?.size === 1 ? 'black' : 'white';
+      const color: 'white' | 'black' = room?.size === 1 ? 'black' : 'white';
       this.playerRoles.set(client.id, { gameId, color });
 
       // Notificar jogador
-      client.emit('gameJoined', { 
+      client.emit('gameJoined', {
         fen: game.fen,
         color,
-        opponent: room?.size === 2 ? 'ready' : 'waiting'
+        opponent: room?.size === 2 ? 'ready' : 'waiting',
       });
 
       // Notificar outros jogadores
@@ -95,7 +98,11 @@ export class GameGateway {
   ) {
     try {
       // Validação de dados
-      if (!data || typeof data.gameId !== 'string' || typeof data.move !== 'string') {
+      if (
+        !data ||
+        typeof data.gameId !== 'string' ||
+        typeof data.move !== 'string'
+      ) {
         throw new Error('Dados inválidos');
       }
 
@@ -114,21 +121,28 @@ export class GameGateway {
       }
 
       // Executar movimento
-      const result: { success: boolean; message?: string; fen?: string; winner?: string } = await this.gameService.makeMove(data.gameId, data.move);
+      const result = (await this.gameService.makeMove(
+        data.gameId,
+        data.move,
+      )) as {
+        success: boolean;
+        message?: string;
+        fen?: string;
+        winner?: string;
+      };
       if (!result.success) throw new Error(result.message);
 
       // Atualizar todos os jogadores
-      this.server.to(data.gameId).emit('gameUpdate', { 
+      this.server.to(data.gameId).emit('gameUpdate', {
         fen: result.fen,
         lastMove: data.move,
-        turn: chess.turn() === 'w' ? 'white' : 'black'
+        turn: chess.turn() === 'w' ? 'white' : 'black',
       });
 
       // Verificar fim de jogo
       if (result.winner) {
         this.server.to(data.gameId).emit('gameOver', { winner: result.winner });
       }
-
     } catch (error) {
       client.emit('moveError', { message: error.message });
       this.logger.error(`Erro no movimento: ${error.message}`);
