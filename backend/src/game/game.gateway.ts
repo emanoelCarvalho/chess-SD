@@ -8,29 +8,48 @@ import {
 import { Server, Socket } from 'socket.io';
 import { GameService } from './game.service';
 import { Logger } from '@nestjs/common';
-import { Chess } from 'chess.js';
 
-@WebSocketGateway(4000, { cors: { origin: '*' } })
+const SOCKET_CONFIG = {
+  pingTimeout: 60000,
+  pingInterval: 25000,
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
+  transports: ['websocket', 'polling'],
+  allowUpgrades: true,
+};
+
+@WebSocketGateway(4000, SOCKET_CONFIG)
 export class GameGateway {
   @WebSocketServer()
   server: Server;
 
   private readonly logger = new Logger(GameGateway.name);
-  private playerRoles: Map<
-    string,
-    { gameId: string; color: 'white' | 'black' }
-  > = new Map();
+  private playerRoles: Map<string, { gameId: string; color: string }> =
+    new Map();
 
   constructor(private readonly gameService: GameService) {}
 
-  handleConnection(client: Socket): void {
+  handleConnection(client: Socket) {
     this.logger.log(`✅ Cliente conectado: ${client.id}`);
+    client.on('error', (err) => {
+      this.logger.error(`Erro na conexão ${client.id}: ${err.message}`);
+    });
   }
 
-  handleDisconnect(client: Socket): void {
+  handleDisconnect(client: Socket) {
     this.logger.log(`⚠️ Cliente desconectado: ${client.id}`);
+    this.cleanupClient(client);
+  }
+
+  private cleanupClient(client: Socket) {
+    client.rooms.forEach((room) => {
+      client.leave(room);
+      this.server.to(room).emit('playerLeft', { playerId: client.id });
+    });
     this.playerRoles.delete(client.id);
-    client.rooms.forEach((room: string) => client.leave(room));
   }
 
   @SubscribeMessage('createGame')
@@ -39,11 +58,16 @@ export class GameGateway {
       const gameId = await this.gameService.createGame();
       client.join(gameId);
       this.playerRoles.set(client.id, { gameId, color: 'white' });
-      client.emit('gameCreated', { gameId, color: 'white' });
-      this.logger.log(`🎲 Novo jogo criado: ${gameId}`);
+
+      client.emit('gameCreated', {
+        gameId,
+        color: 'white',
+        players: [client.id],
+      });
+
+      this.logger.log(`🎲 Novo jogo criado: ${gameId} por ${client.id}`);
     } catch (error) {
-      this.logger.error(`Erro ao criar jogo: ${error.message}`);
-      client.emit('error', { message: 'Falha ao criar jogo' });
+      this.handleError(client, 'createGame', error);
     }
   }
 
@@ -51,101 +75,155 @@ export class GameGateway {
   async handleJoinGame(
     @MessageBody() gameId: string,
     @ConnectedSocket() client: Socket,
-  ): Promise<void> {
+  ) {
     try {
-      // Validação básica
-      if (!gameId || typeof gameId !== 'string') {
-        throw new Error('ID do jogo inválido');
-      }
+      if (!this.validateGameId(client, gameId)) return;
 
-      // Verificar se o jogo existe
       const game = await this.gameService.getGame(gameId);
-      if (!game) throw new Error('Jogo não encontrado');
-
-      // Verificar lotação máxima
-      const room = this.server.sockets.adapter.rooms.get(gameId);
-      if (room?.size >= 2) {
-        throw new Error('Jogo já está cheio');
+      if (!game) {
+        client.emit('error', {
+          code: 'GAME_NOT_FOUND',
+          message: 'Jogo não encontrado',
+        });
+        return;
       }
 
-      // Entrar na sala e atribuir cor
-      client.join(gameId);
-      const color: 'white' | 'black' = room?.size === 1 ? 'black' : 'white';
+      const color = this.assignPlayerColor(gameId);
       this.playerRoles.set(client.id, { gameId, color });
 
-      // Notificar jogador
-      client.emit('gameJoined', {
-        fen: game.fen,
-        color,
-        opponent: room?.size === 2 ? 'ready' : 'waiting',
-      });
-
-      // Notificar outros jogadores
-      if (room?.size === 2) {
-        this.server.to(gameId).emit('gameStart', { fen: game.fen });
-      }
-
-      this.logger.log(`👤 ${client.id} entrou no ${gameId} como ${color}`);
+      client.join(gameId);
+      this.notifyGameJoin(client, gameId, color, game);
     } catch (error) {
-      client.emit('error', { message: error.message });
+      this.handleError(client, 'joinGame', error);
     }
   }
 
   @SubscribeMessage('move')
   async handleMove(
-    @MessageBody() data: { gameId: string; move: string },
+    @MessageBody()
+    data: {
+      gameId: string;
+      from: [number, number];
+      to: [number, number];
+    },
     @ConnectedSocket() client: Socket,
   ) {
     try {
-      // Validação de dados
-      if (
-        !data ||
-        typeof data.gameId !== 'string' ||
-        typeof data.move !== 'string'
-      ) {
-        throw new Error('Dados inválidos');
-      }
+      if (!this.validateMoveData(client, data)) return;
 
-      // Verificar associação do jogador
-      const player = this.playerRoles.get(client.id);
-      if (!player || player.gameId !== data.gameId) {
-        throw new Error('Não autorizado');
-      }
-
-      // Verificar turno
-      const game = await this.gameService.getGame(data.gameId);
-      const chess = new Chess(game.fen);
-      const currentTurn = chess.turn() === 'w' ? 'white' : 'black';
-      if (currentTurn !== player.color) {
-        throw new Error('Não é seu turno');
-      }
-
-      // Executar movimento
-      const result = (await this.gameService.makeMove(
+      const result = await this.gameService.makeMove(
         data.gameId,
-        data.move,
-      )) as {
-        success: boolean;
-        message?: string;
-        fen?: string;
-        winner?: string;
-      };
-      if (!result.success) throw new Error(result.message);
+        data.from,
+        data.to,
+      );
 
-      // Atualizar todos os jogadores
-      this.server.to(data.gameId).emit('gameUpdate', {
-        fen: result.fen,
-        lastMove: data.move,
-        turn: chess.turn() === 'w' ? 'white' : 'black',
-      });
-
-      // Verificar fim de jogo
-      if (result.winner) {
-        this.server.to(data.gameId).emit('gameOver', { winner: result.winner });
+      if (!result.success) {
+        throw new Error(result.message);
       }
+
+      this.server.to(data.gameId).emit('gameUpdate', {
+        board: result.board,
+        turn: result.turn,
+        lastMove: { from: data.from, to: data.to },
+        player: client.id,
+      });
     } catch (error) {
-      client.emit('moveError', { message: error.message });
-      this.logger.error(`Erro no movimento: ${error.message}`);
+      this.handleError(client, 'move', error);
     }
+  }
+
+  private validateGameId(client: Socket, gameId: string): boolean {
+    if (!gameId || typeof gameId !== 'string') {
+      client.emit('error', {
+        code: 'INVALID_GAME_ID',
+        message: 'ID do jogo inválido',
+      });
+      return false;
+    }
+
+    if (client.rooms.has(gameId)) {
+      client.emit('error', {
+        code: 'ALREADY_IN_GAME',
+        message: 'Você já está neste jogo',
+      });
+      return false;
+    }
+    return true;
+  }
+
+  private assignPlayerColor(gameId: string): string {
+    const players = Array.from(this.playerRoles.values()).filter(
+      (p) => p.gameId === gameId,
+    );
+
+    return players.length % 2 === 0 ? 'white' : 'black';
+  }
+
+  private notifyGameJoin(
+    client: Socket,
+    gameId: string,
+    color: string,
+    game: any,
+  ) {
+    client.emit('gameJoined', {
+      gameId,
+      color,
+      board: game.board,
+      turn: game.turn,
+      players: Array.from(this.getPlayersInGame(gameId)),
+    });
+
+    client.to(gameId).emit('playerJoined', {
+      playerId: client.id,
+      color,
+      totalPlayers: this.playerRoles.size,
+    });
+
+    this.logger.log(`👥 ${client.id} entrou no jogo ${gameId} como ${color}`);
+  }
+
+  private validateMoveData(client: Socket, data: any): boolean {
+    const playerInfo = this.playerRoles.get(client.id);
+
+    if (!playerInfo || playerInfo.gameId !== data.gameId) {
+      client.emit('moveError', {
+        code: 'NOT_IN_GAME',
+        message: 'Você não está neste jogo',
+      });
+      return false;
+    }
+
+    const isValidMove =
+      data.from?.length === 2 &&
+      data.to?.length === 2 &&
+      data.from.every(Number.isInteger) &&
+      data.to.every(Number.isInteger) &&
+      data.from.every((n) => n >= 0 && n < 8) &&
+      data.to.every((n) => n >= 0 && n < 8);
+
+    if (!isValidMove) {
+      client.emit('moveError', {
+        code: 'INVALID_MOVE_FORMAT',
+        message: 'Formato de movimento inválido',
+      });
+      return false;
+    }
+
+    return true;
+  }
+
+  private getPlayersInGame(gameId: string): string[] {
+    return Array.from(this.playerRoles.entries())
+      .filter(([_, info]) => info.gameId === gameId)
+      .map(([id]) => id);
+  }
+
+  private handleError(client: Socket, context: string, error: Error) {
+    this.logger.error(`Erro em ${context}: ${error.message}`, error.stack);
+    client.emit('error', {
+      code: 'INTERNAL_ERROR',
+      message: `Erro durante ${context}`,
+      details: error.message,
+    });
   }
 }

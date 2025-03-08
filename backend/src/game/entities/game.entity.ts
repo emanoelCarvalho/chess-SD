@@ -1,16 +1,16 @@
-import { Entity, Column, PrimaryGeneratedColumn, PrimaryColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
 @Entity()
 export class Game {
-  @PrimaryColumn()
+  @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column('text')
-  fen: string;
+  @Column('jsonb')
+  board: string[][]; // Agora armazenado corretamente como JSONB
 
-  @Column('text')
-  pgn: string;
+  @Column({ type: 'char', length: 1, default: 'w' })
+  turn: string; // 'w' para branco, 'b' para preto
 
-  @Column('text', { nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   winner: string | null;
 }
